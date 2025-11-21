@@ -1,48 +1,17 @@
-from database import db_helper
+# bot.py
 import asyncio
 import logging
+import os
+import requests
+from datetime import datetime
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, 
     filters, ContextTypes, ConversationHandler, CallbackQueryHandler
 )
 from telegram.error import Forbidden, BadRequest
-import requests
-
 from config import Config
 from database import db_helper
-from datetime import datetime
-
-
-# Add after other imports in bot.py
-import os  # Add this if not already present
-
-# NEW DEBUG COMMAND
-async def debug_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Debug command to check owner configuration"""
-    user = update.effective_user
-    
-    await update.message.reply_text(
-        f"🔧 <b>Debug Info</b>\n\n"
-        f"Your ID: <code>{user.id}</code>\n"
-        f"Owner ID: <code>{Config.OWNER_ID}</code>\n"
-        f"Match: <b>{user.id == Config.OWNER_ID}</b>\n\n"
-        f"Env OWNER_ID: <code>'{os.getenv('OWNER_ID', 'NOT_SET')}'</code>",
-        parse_mode="HTML"
-    )
-
-# NEW GET MY ID COMMAND
-async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Get your Telegram user ID"""
-    user = update.effective_user
-    await update.message.reply_text(
-        f"🆔 <b>Your Telegram ID:</b>\n\n"
-        f"<code>{user.id}</code>\n\n"
-        f"Use this as OWNER_ID in your environment variables.",
-        parse_mode="HTML"
-    )
-
-
 
 # Enable logging
 logging.basicConfig(
@@ -70,17 +39,7 @@ async def check_channel_membership(user_id, context):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
-    # DEBUG LOG - First message to bot
-    if user.id == Config.OWNER_ID:
-        await db_helper.log_to_group(
-            context.bot,
-            f"🔑 <b>Owner Started Bot</b>\n"
-            f"ID: {user.id}\n"
-            f"Configured Owner ID: {Config.OWNER_ID}\n"
-            f"Match: ✅ YES"
-        )
-    
-    # Rest of your existing start code...
+    # Create user if not exists
     existing_user = await db_helper.get_user(user.id)
     if not existing_user:
         await db_helper.create_user(user.id, user.username)
@@ -99,16 +58,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             url=f"https://t.me/{Config.FORCE_JOIN_CHANNEL.strip('@')}"
         )]]
         await update.message.reply_text(
-            "⚠️ You must join @sukuna_bots1 the channel to use this bot!",
+            "⚠️ You must join the channel to use this bot!",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
     
     # Show main menu
     keyboard = [
-        [InlineKeyboardButton("Generate Image", callback_data="gen")],
-        [InlineKeyboardButton("My Stats", callback_data="stats")],
-        [InlineKeyboardButton("Refer & Earn", callback_data="refer")]
+        [InlineKeyboardButton("🎨 Generate Image", callback_data="gen")],
+        [InlineKeyboardButton("📊 My Info", callback_data="info")],
+        [InlineKeyboardButton("🎟️ Refer & Earn", callback_data="refer")]
     ]
     
     await update.message.reply_text(
@@ -128,22 +87,20 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎨 <b>Image Generation:</b>
 /gen &lt;query&gt; - Generate an image
 
-💰 <b>Credit Codes:</b>
-/redeem &lt;code&gt; - Redeem credit code
-
 📊 <b>User Commands:</b>
 /start - Start the bot
 /help - Show this help
+/info - View your personal stats
 /refer - Get referral link
 /claim &lt;code&gt; - Claim referral code (⚠️ ONCE PER USER)
-/stats - View your stats
+/redeem &lt;code&gt; - Redeem credit code
 
 👑 <b>Admin Commands:</b>
 /gencode &lt;amount&gt; &lt;code&gt; - Generate credit code
+/stats - View bot statistics
 /whitelist &lt;user_id&gt; - Add unlimited user
 /rm_whitelist &lt;user_id&gt; - Remove from whitelist
 /broadcast - Broadcast message
-/stats - View bot statistics
 
 👑 <b>Owner Commands:</b>
 /add_admin &lt;user_id&gt; - Add admin
@@ -250,30 +207,72 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"❌ {message}")
 
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show user's personal stats: credits, daily usage, etc."""
     user = update.effective_user
     user_data = await db_helper.get_user(user.id)
     
     if not user_data:
-        await update.message.reply_text("Use /start first!")
+        await update.message.reply_text("❌ Use /start first!")
         return
     
     daily_used = user_data.get("daily_count", 0)
     credits = user_data.get("total_credits", 0)
     role = user_data.get("role", "user")
     
+    # Calculate remaining daily
+    daily_remaining = 10 - daily_used if credits == 0 else "Unlimited (credits available)"
+    
     await update.message.reply_text(
-        f"📊 <b>Your Stats</b>\n\n"
-        f"🆔 ID: <code>{user.id}</code>\n"
-        f"👤 Username: @{user.username}\n"
-        f"🎖️ Role: {role.upper()}\n"
-        f"🎨 Daily Used: {daily_used}/10\n"
-        f"🎟️ Credits: {credits}\n"
-        f"📅 Last Reset: {user_data.get('last_reset')}",
+        f"📊 <b>Your Personal Stats</b>\n\n"
+        f"🆔 User ID: <code>{user.id}</code>\n"
+        f"👤 Username: @{user.username or 'None'}\n"
+        f"🎖️ Role: {role.upper()}\n\n"
+        f"🎨 Daily Usage: {daily_used}/10\n"
+        f"💰 Daily Remaining: {daily_remaining}\n"
+        f"🎟️ Credit Balance: {credits}\n\n"
+        f"📅 Last Reset: {user_data.get('last_reset', 'Not set')}\n"
+        f"🎯 Referral Claimed: {'✅ Yes' if user_data.get('has_claimed_referral') else '❌ No'}",
         parse_mode="HTML"
     )
 
-# Admin Commands
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show bot statistics (Admin/Owner only)"""
+    user = update.effective_user
+    
+    # Check if user is admin or owner
+    if not (await db_helper.is_admin(user.id) or await db_helper.is_owner(user.id)):
+        await update.message.reply_text(
+            "❌ <b>Admin/Owner Only!</b>\n\n"
+            f"Your ID: <code>{user.id}</code>\n"
+            f"Your Role: {await db_helper.get_user(user.id).get('role', 'user')}",
+            parse_mode="HTML"
+        )
+        return
+    
+    users = await db_helper.get_all_users()
+    
+    # Count roles
+    role_counts = {"user": 0, "admin": 0, "whitelist": 0}
+    for u in users:
+        role_counts[u.get("role", "user")] += 1
+    
+    # Get today's stats
+    today = datetime.now().date().isoformat()
+    active_today = list(db_helper.users.find({"last_reset": today}))
+    
+    await update.message.reply_text(
+        f"🤖 <b>Bot Statistics</b>\n\n"
+        f"👥 Total Users: <code>{len(users)}</code>\n"
+        f"👤 Regular Users: <code>{role_counts['user']}</code>\n"
+        f"👮 Admins: <code>{role_counts['admin']}</code>\n"
+        f"⭐ Whitelisted: <code>{role_counts['whitelist']}</code>\n\n"
+        f"📊 Active Today: <code>{len(active_today)}</code>\n"
+        f"🎯 Generated Images: <code>Coming soon</code>\n\n"
+        f"📅 Date: <code>{today}</code>",
+        parse_mode="HTML"
+    )
+
 async def add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != Config.OWNER_ID:
         await update.message.reply_text("❌ Only owner can use this!")
@@ -404,95 +403,6 @@ async def broadcast_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Broadcast cancelled")
     return ConversationHandler.END
 
-async def bot_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    
-    if not (await db_helper.is_admin(user.id) or await db_helper.is_owner(user.id)):
-        await update.message.reply_text("❌ Admin only!")
-        return
-    
-    users = await db_helper.get_all_users()
-    
-    role_counts = {"user": 0, "admin": 0, "whitelist": 0}
-    for u in users:
-        role_counts[u.get("role", "user")] += 1
-    
-    await update.message.reply_text(
-        f"📊 <b>Bot Statistics</b>\n\n"
-        f"👥 Total Users: {len(users)}\n"
-        f"👤 Normal Users: {role_counts['user']}\n"
-        f"👮 Admins: {role_counts['admin']}\n"
-        f"⭐ Whitelisted: {role_counts['whitelist']}",
-        parse_mode="HTML"
-    )
-
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data == "gen":
-        await query.message.reply_text("Use /gen &lt;query&gt; to generate an image")
-    elif query.data == "stats":
-        await stats(update, context)
-    elif query.data == "refer":
-        await refer(update, context)
-
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.error(f"Update {update} caused error {context.error}")
-    if update and update.effective_user:
-        await db_helper.log_to_group(
-            context.bot,
-            f"#Error\n"
-            f"User: {update.effective_user.id}\n"
-            f"Error: {str(context.error)}"
-        )
-
-def main():
-    application = Application.builder().token(Config.BOT_TOKEN).build()
-    
-    # Command handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("gen", generate_image))
-    application.add_handler(CommandHandler("gencode", generate_credit_code))
-    application.add_handler(CommandHandler("redeem", redeem_code))
-    application.add_handler(CommandHandler("refer", refer))
-    application.add_handler(CommandHandler("claim", claim))
-    application.add_handler(CommandHandler("stats", stats))
-    
-    # Owner commands
-    application.add_handler(CommandHandler("add_admin", add_admin))
-    application.add_handler(CommandHandler("rm_admin", remove_admin))
-    
-    # Admin commands
-    application.add_handler(CommandHandler("whitelist", whitelist_user))
-    application.add_handler(CommandHandler("rm_whitelist", remove_whitelist))
-    application.add_handler(CommandHandler("bot_stats", bot_stats))
-    
-    # Broadcast conversation
-    broadcast_conv = ConversationHandler(
-        entry_points=[CommandHandler("broadcast", broadcast_start)],
-        states={
-            BROADCAST: [MessageHandler(filters.ALL & ~filters.COMMAND, broadcast_receive)]
-        },
-        fallbacks=[
-            CommandHandler("cancel", broadcast_cancel),
-            CommandHandler("broadcast", broadcast_start)
-        ]
-    )
-    application.add_handler(broadcast_conv)
-    
-    # Callback query handler (FIXED)
-    application.add_handler(CallbackQueryHandler(button_handler))
-    
-    # Error handler
-    application.add_error_handler(error_handler)
-    
-    application.run_polling()
-
-
-    # Add these new command handlers
-
 async def generate_credit_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Generate a credit code: /gencode <amount> <code>"""
     user = update.effective_user
@@ -557,99 +467,57 @@ async def redeem_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"❌ {message}")
 
-# Modified claim command with one-time check
-async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Claim referral code (one-time only per user)"""
+async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get your Telegram user ID"""
+    user = update.effective_user
+    await update.message.reply_text(
+        f"🆔 <b>Your Telegram ID:</b>\n\n"
+        f"<code>{user.id}</code>\n\n"
+        f"Use this as OWNER_ID in your environment variables.",
+        parse_mode="HTML"
+    )
+
+async def debug_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Debug: Show current configuration values"""
     user = update.effective_user
     
-    # Check if user has already claimed a referral
-    if await db_helper.has_user_claimed_referral(user.id):
-        await update.message.reply_text(
-            "❌ You can only claim one referral code in your lifetime!"
-        )
+    # Only owner can see this
+    if user.id != Config.OWNER_ID:
+        await update.message.reply_text("❌ Owner only!")
         return
     
-    if not context.args:
-        await update.message.reply_text("⚠️ Usage: /claim <code>")
-        return
+    await update.message.reply_text(
+        f"🔧 <b>Configuration Debug</b>\n\n"
+        f"OWNER_ID: <code>{Config.OWNER_ID}</code>\n"
+        f"Your ID: <code>{user.id}</code>\n"
+        f"Match: <b>{user.id == Config.OWNER_ID}</b>\n\n"
+        f"LOG_GROUP_ID: <code>{Config.LOG_GROUP_ID}</code>\n"
+        f"FORCE_JOIN: <code>{Config.FORCE_JOIN_CHANNEL}</code>\n"
+        f"MONGO_URI: <code>{'✅ Set' if Config.MONGO_URI else '❌ Missing'}</code>\n"
+        f"Bot Token: <code>{'✅ Set' if Config.BOT_TOKEN else '❌ Missing'}</code>",
+        parse_mode="HTML"
+    )
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
     
-    code = context.args[0]
-    success, message = await db_helper.claim_referral(code, user.id)
-    
-    if success:
-        # Mark user as having claimed a referral
-        await db_helper.mark_user_claimed_referral(user.id)
-        
-        await update.message.reply_text(f"✅ {message}")
+    if query.data == "gen":
+        await query.message.reply_text("Use /gen <query> to generate an image")
+    elif query.data == "info":
+        await info(update, context)
+    elif query.data == "refer":
+        await refer(update, context)
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.error(f"Update {update} caused error {context.error}")
+    if update and update.effective_user:
         await db_helper.log_to_group(
             context.bot,
-            f"#ReferralClaimed\n"
-            f"User: {user.mention_html()} (ID: {user.id})\n"
-            f"Code: {code}\n"
-            f"Result: {message}"
+            f"#Error\n"
+            f"User: {update.effective_user.id}\n"
+            f"Error: {str(context.error)}"
         )
-    else:
-        await update.message.reply_text(f"❌ {message}")
-
-# ... [Previous commands remain unchanged] ...
-
-    
-    # Owner commands
-    application.add_handler(CommandHandler("add_admin", add_admin))
-    application.add_handler(CommandHandler("rm_admin", remove_admin))
-    
-    # Admin commands
-    application.add_handler(CommandHandler("whitelist", whitelist_user))
-    application.add_handler(CommandHandler("rm_whitelist", remove_whitelist))
-    application.add_handler(CommandHandler("bot_stats", bot_stats))
-    
-    # Broadcast conversation
-    broadcast_conv = ConversationHandler(
-        entry_points=[CommandHandler("broadcast", broadcast_start)],
-        states={
-            BROADCAST: [MessageHandler(filters.ALL & ~filters.COMMAND, broadcast_receive)]
-        },
-        fallbacks=[
-            CommandHandler("cancel", broadcast_cancel),
-            CommandHandler("broadcast", broadcast_start)
-        ]
-    )
-    application.add_handler(broadcast_conv)
-    
-    # Callback query handler
-    application.add_handler(CallbackQueryHandler(button_handler))
-    
-    # Error handler
-    application.add_error_handler(error_handler)
-    
-    application.run_polling()
-
-if __name__ == "__main__":
-    main()
-
-    
-    
-    # Broadcast conversation
-    broadcast_conv = ConversationHandler(
-        entry_points=[CommandHandler("broadcast", broadcast_start)],
-        states={
-            BROADCAST: [MessageHandler(filters.ALL & ~filters.COMMAND, broadcast_receive)]
-        },
-        fallbacks=[
-            CommandHandler("cancel", broadcast_cancel),
-            CommandHandler("broadcast", broadcast_start)
-        ]
-    )
-    application.add_handler(broadcast_conv)
-    
-    # Callback query handler
-    application.add_handler(update.callback_query_handler(button_handler))
-    
-    # Error handler
-    application.add_error_handler(error_handler)
-    
-    # Start bot
-    application.run_polling()
 
 def main():
     application = Application.builder().token(Config.BOT_TOKEN).build()
@@ -664,18 +532,18 @@ def main():
     application.add_handler(CommandHandler("debug_config", debug_config))
     application.add_handler(CommandHandler("refer", refer))
     application.add_handler(CommandHandler("claim", claim))
-    application.add_handler(CommandHandler("stats", stats))
+    application.add_handler(CommandHandler("info", info))
     
     # Owner commands
     application.add_handler(CommandHandler("add_admin", add_admin))
     application.add_handler(CommandHandler("rm_admin", remove_admin))
     
-    # Admin commands
+    # Admin/Owner commands
+    application.add_handler(CommandHandler("stats", stats))
     application.add_handler(CommandHandler("whitelist", whitelist_user))
     application.add_handler(CommandHandler("rm_whitelist", remove_whitelist))
-    application.add_handler(CommandHandler("bot_stats", bot_stats))
     
-    # Broadcast
+    # Broadcast conversation
     broadcast_conv = ConversationHandler(
         entry_points=[CommandHandler("broadcast", broadcast_start)],
         states={BROADCAST: [MessageHandler(filters.ALL & ~filters.COMMAND, broadcast_receive)]},
@@ -683,13 +551,12 @@ def main():
     )
     application.add_handler(broadcast_conv)
     
-    # Callbacks
+    # Callback queries
     application.add_handler(CallbackQueryHandler(button_handler))
     
-    # Errors
+    # Error handler
     application.add_error_handler(error_handler)
     
-    # Start
     print(f"🚀 Bot started! Owner ID: {Config.OWNER_ID}")
     application.run_polling()
 
