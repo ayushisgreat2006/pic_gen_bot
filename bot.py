@@ -60,7 +60,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             url=f"https://t.me/{Config.FORCE_JOIN_CHANNEL.strip('@')}"
         )]]
         await update.message.reply_text(
-            "⚠️ You must join the channel to use this bot!",
+            "⚠️ You must join @sukuna_bots1 the channel to use this bot!",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
