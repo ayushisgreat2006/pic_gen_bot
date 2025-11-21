@@ -593,18 +593,6 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ... [Previous commands remain unchanged] ...
 
-def main():
-    application = Application.builder().token(Config.BOT_TOKEN).build()
-    
-    # Command handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("gen", generate_image))
-    application.add_handler(CommandHandler("gencode", generate_credit_code))  # NEW
-    application.add_handler(CommandHandler("redeem", redeem_code))            # NEW
-    application.add_handler(CommandHandler("refer", refer))
-    application.add_handler(CommandHandler("claim", claim))
-    application.add_handler(CommandHandler("stats", stats))
     
     # Owner commands
     application.add_handler(CommandHandler("add_admin", add_admin))
@@ -661,6 +649,48 @@ if __name__ == "__main__":
     application.add_error_handler(error_handler)
     
     # Start bot
+    application.run_polling()
+
+def main():
+    application = Application.builder().token(Config.BOT_TOKEN).build()
+    
+    # User commands
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("gen", generate_image))
+    application.add_handler(CommandHandler("gencode", generate_credit_code))
+    application.add_handler(CommandHandler("redeem", redeem_code))
+    application.add_handler(CommandHandler("myid", myid))
+    application.add_handler(CommandHandler("debug_config", debug_config))
+    application.add_handler(CommandHandler("refer", refer))
+    application.add_handler(CommandHandler("claim", claim))
+    application.add_handler(CommandHandler("stats", stats))
+    
+    # Owner commands
+    application.add_handler(CommandHandler("add_admin", add_admin))
+    application.add_handler(CommandHandler("rm_admin", remove_admin))
+    
+    # Admin commands
+    application.add_handler(CommandHandler("whitelist", whitelist_user))
+    application.add_handler(CommandHandler("rm_whitelist", remove_whitelist))
+    application.add_handler(CommandHandler("bot_stats", bot_stats))
+    
+    # Broadcast
+    broadcast_conv = ConversationHandler(
+        entry_points=[CommandHandler("broadcast", broadcast_start)],
+        states={BROADCAST: [MessageHandler(filters.ALL & ~filters.COMMAND, broadcast_receive)]},
+        fallbacks=[CommandHandler("cancel", broadcast_cancel)]
+    )
+    application.add_handler(broadcast_conv)
+    
+    # Callbacks
+    application.add_handler(CallbackQueryHandler(button_handler))
+    
+    # Errors
+    application.add_error_handler(error_handler)
+    
+    # Start
+    print(f"🚀 Bot started! Owner ID: {Config.OWNER_ID}")
     application.run_polling()
 
 if __name__ == "__main__":
