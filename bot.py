@@ -86,14 +86,18 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎨 <b>Image Generation:</b>
 /gen &lt;query&gt; - Generate an image
 
+💰 <b>Credit Codes:</b>
+/redeem &lt;code&gt; - Redeem credit code
+
 📊 <b>User Commands:</b>
 /start - Start the bot
 /help - Show this help
 /refer - Get referral link
-/claim &lt;code&gt; - Claim referral code
+/claim &lt;code&gt; - Claim referral code (⚠️ ONCE PER USER)
 /stats - View your stats
 
 👑 <b>Admin Commands:</b>
+/gencode &lt;amount&gt; &lt;code&gt; - Generate credit code
 /whitelist &lt;user_id&gt; - Add unlimited user
 /rm_whitelist &lt;user_id&gt; - Remove from whitelist
 /broadcast - Broadcast message
@@ -420,6 +424,157 @@ def main():
     application.add_handler(CommandHandler("whitelist", whitelist_user))
     application.add_handler(CommandHandler("rm_whitelist", remove_whitelist))
     application.add_handler(CommandHandler("bot_stats", bot_stats))
+
+
+    # Add these new command handlers
+
+async def generate_credit_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate a credit code: /gencode <amount> <code>"""
+    user = update.effective_user
+    
+    if not (await db_helper.is_admin(user.id) or await db_helper.is_owner(user.id)):
+        await update.message.reply_text("❌ Admin/Owner only!")
+        return
+    
+    if len(context.args) != 2:
+        await update.message.reply_text("⚠️ Usage: /gencode <amount> <code>")
+        return
+    
+    try:
+        amount = int(context.args[0])
+        code = context.args[1]
+        
+        if amount <= 0:
+            await update.message.reply_text("❌ Amount must be positive!")
+            return
+        
+        await db_helper.generate_credit_code(code, amount, user.id)
+        await update.message.reply_text(
+            f"✅ Credit code generated!\n\n"
+            f"Code: <code>{code}</code>\n"
+            f"Amount: {amount} credits",
+            parse_mode="HTML"
+        )
+        
+        await db_helper.log_to_group(
+            context.bot,
+            f"#CreditCodeGenerated\n"
+            f"By: {user.mention_html()}\n"
+            f"Code: {code}\n"
+            f"Amount: {amount}"
+        )
+        
+    except ValueError:
+        await update.message.reply_text("❌ Amount must be a number")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: Code already exists")
+
+async def redeem_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Redeem a credit code: /redeem <code>"""
+    user = update.effective_user
+    
+    if not context.args:
+        await update.message.reply_text("⚠️ Usage: /redeem <code>")
+        return
+    
+    code = context.args[0]
+    success, message = await db_helper.redeem_credit_code(code, user.id)
+    
+    if success:
+        await update.message.reply_text(f"🎉 {message}")
+        await db_helper.log_to_group(
+            context.bot,
+            f"#CodeRedeemed\n"
+            f"User: {user.mention_html()} (ID: {user.id})\n"
+            f"Code: {code}\n"
+            f"Result: {message}"
+        )
+    else:
+        await update.message.reply_text(f"❌ {message}")
+
+# Modified claim command with one-time check
+async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Claim referral code (one-time only per user)"""
+    user = update.effective_user
+    
+    # Check if user has already claimed a referral
+    if await db_helper.has_user_claimed_referral(user.id):
+        await update.message.reply_text(
+            "❌ You can only claim one referral code in your lifetime!"
+        )
+        return
+    
+    if not context.args:
+        await update.message.reply_text("⚠️ Usage: /claim <code>")
+        return
+    
+    code = context.args[0]
+    success, message = await db_helper.claim_referral(code, user.id)
+    
+    if success:
+        # Mark user as having claimed a referral
+        await db_helper.mark_user_claimed_referral(user.id)
+        
+        await update.message.reply_text(f"✅ {message}")
+        await db_helper.log_to_group(
+            context.bot,
+            f"#ReferralClaimed\n"
+            f"User: {user.mention_html()} (ID: {user.id})\n"
+            f"Code: {code}\n"
+            f"Result: {message}"
+        )
+    else:
+        await update.message.reply_text(f"❌ {message}")
+
+# ... [Previous commands remain unchanged] ...
+
+def main():
+    application = Application.builder().token(Config.BOT_TOKEN).build()
+    
+    # Command handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("gen", generate_image))
+    application.add_handler(CommandHandler("gencode", generate_credit_code))  # NEW
+    application.add_handler(CommandHandler("redeem", redeem_code))            # NEW
+    application.add_handler(CommandHandler("refer", refer))
+    application.add_handler(CommandHandler("claim", claim))
+    application.add_handler(CommandHandler("stats", stats))
+    
+    # Owner commands
+    application.add_handler(CommandHandler("add_admin", add_admin))
+    application.add_handler(CommandHandler("rm_admin", remove_admin))
+    
+    # Admin commands
+    application.add_handler(CommandHandler("whitelist", whitelist_user))
+    application.add_handler(CommandHandler("rm_whitelist", remove_whitelist))
+    application.add_handler(CommandHandler("bot_stats", bot_stats))
+    
+    # Broadcast conversation
+    broadcast_conv = ConversationHandler(
+        entry_points=[CommandHandler("broadcast", broadcast_start)],
+        states={
+            BROADCAST: [MessageHandler(filters.ALL & ~filters.COMMAND, broadcast_receive)]
+        },
+        fallbacks=[
+            CommandHandler("cancel", broadcast_cancel),
+            CommandHandler("broadcast", broadcast_start)
+        ]
+    )
+    application.add_handler(broadcast_conv)
+    
+    # Callback query handler
+    application.add_handler(update.callback_query_handler(button_handler))
+    
+    # Error handler
+    application.add_error_handler(error_handler)
+    
+    application.run_polling()
+
+if __name__ == "__main__":
+    main()
+
+    
     
     # Broadcast conversation
     broadcast_conv = ConversationHandler(
