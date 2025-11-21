@@ -3,13 +3,14 @@ import logging
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, 
-    filters, ContextTypes, ConversationHandler
+    filters, ContextTypes, ConversationHandler, CallbackQueryHandler
 )
 from telegram.error import Forbidden, BadRequest
 import requests
 from config import Config
 from database import db_helper
 from datetime import datetime
+
 
 # Enable logging
 logging.basicConfig(
@@ -412,6 +413,8 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("gen", generate_image))
+    application.add_handler(CommandHandler("gencode", generate_credit_code))
+    application.add_handler(CommandHandler("redeem", redeem_code))
     application.add_handler(CommandHandler("refer", refer))
     application.add_handler(CommandHandler("claim", claim))
     application.add_handler(CommandHandler("stats", stats))
@@ -424,6 +427,27 @@ def main():
     application.add_handler(CommandHandler("whitelist", whitelist_user))
     application.add_handler(CommandHandler("rm_whitelist", remove_whitelist))
     application.add_handler(CommandHandler("bot_stats", bot_stats))
+    
+    # Broadcast conversation
+    broadcast_conv = ConversationHandler(
+        entry_points=[CommandHandler("broadcast", broadcast_start)],
+        states={
+            BROADCAST: [MessageHandler(filters.ALL & ~filters.COMMAND, broadcast_receive)]
+        },
+        fallbacks=[
+            CommandHandler("cancel", broadcast_cancel),
+            CommandHandler("broadcast", broadcast_start)
+        ]
+    )
+    application.add_handler(broadcast_conv)
+    
+    # Callback query handler (FIXED)
+    application.add_handler(CallbackQueryHandler(button_handler))
+    
+    # Error handler
+    application.add_error_handler(error_handler)
+    
+    application.run_polling()
 
 
     # Add these new command handlers
@@ -564,7 +588,7 @@ def main():
     application.add_handler(broadcast_conv)
     
     # Callback query handler
-    application.add_handler(update.callback_query_handler(button_handler))
+    application.add_handler(CallbackQueryHandler(button_handler))
     
     # Error handler
     application.add_error_handler(error_handler)
