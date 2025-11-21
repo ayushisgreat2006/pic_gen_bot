@@ -14,6 +14,36 @@ from database import db_helper
 from datetime import datetime
 
 
+# Add after other imports in bot.py
+import os  # Add this if not already present
+
+# NEW DEBUG COMMAND
+async def debug_owner(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Debug command to check owner configuration"""
+    user = update.effective_user
+    
+    await update.message.reply_text(
+        f"🔧 <b>Debug Info</b>\n\n"
+        f"Your ID: <code>{user.id}</code>\n"
+        f"Owner ID: <code>{Config.OWNER_ID}</code>\n"
+        f"Match: <b>{user.id == Config.OWNER_ID}</b>\n\n"
+        f"Env OWNER_ID: <code>'{os.getenv('OWNER_ID', 'NOT_SET')}'</code>",
+        parse_mode="HTML"
+    )
+
+# NEW GET MY ID COMMAND
+async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get your Telegram user ID"""
+    user = update.effective_user
+    await update.message.reply_text(
+        f"🆔 <b>Your Telegram ID:</b>\n\n"
+        f"<code>{user.id}</code>\n\n"
+        f"Use this as OWNER_ID in your environment variables.",
+        parse_mode="HTML"
+    )
+
+
+
 # Enable logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -39,9 +69,18 @@ async def check_channel_membership(user_id, context):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    chat = update.effective_chat
     
-    # Create user if not exists
+    # DEBUG LOG - First message to bot
+    if user.id == Config.OWNER_ID:
+        await db_helper.log_to_group(
+            context.bot,
+            f"🔑 <b>Owner Started Bot</b>\n"
+            f"ID: {user.id}\n"
+            f"Configured Owner ID: {Config.OWNER_ID}\n"
+            f"Match: ✅ YES"
+        )
+    
+    # Rest of your existing start code...
     existing_user = await db_helper.get_user(user.id)
     if not existing_user:
         await db_helper.create_user(user.id, user.username)
